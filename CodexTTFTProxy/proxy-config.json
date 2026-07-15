@@ -1,0 +1,7 @@
+{
+  "interval": 60,
+  "upstream": "https://www.aiwanwu.cc",
+  "ttftTimeoutSeconds": 120,
+  "ttftRetries": 4,
+  "heartbeatSeconds": 15
+}
