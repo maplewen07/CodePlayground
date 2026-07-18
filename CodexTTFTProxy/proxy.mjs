@@ -11,6 +11,7 @@ const PORT = Number(process.env.PORT || 43181);
 const CONFIG_PATH = process.env.TTFT_CONFIG_PATH || path.join(os.homedir(), ".codex", "local-ttft-proxy", "proxy-config.json");
 const DEFAULT_UPSTREAM = "https://api.020s.com/";
 let UPSTREAM = new URL(process.env.UPSTREAM_BASE_URL || DEFAULT_UPSTREAM);
+let UPSTREAM_API_KEY = process.env.UPSTREAM_API_KEY || null;
 let TTFT_TIMEOUT_MS = Number(process.env.TTFT_TIMEOUT_MS || 120_000);
 let TTFT_RETRIES = Number(process.env.TTFT_RETRIES || 4);
 let HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS || 15_000);
@@ -27,6 +28,11 @@ function readConfig() {
         log(`config upstream changed: ${UPSTREAM.origin} → ${next.origin}`);
         UPSTREAM = next;
       }
+    }
+    if (!process.env.UPSTREAM_API_KEY && Object.hasOwn(cfg, "apiKey") && typeof cfg.apiKey === "string") {
+      const next = cfg.apiKey.trim() || null;
+      if (next !== UPSTREAM_API_KEY) log(`config API key ${next ? "changed" : "override disabled"}`);
+      UPSTREAM_API_KEY = next;
     }
     if (!process.env.TTFT_TIMEOUT_MS && typeof cfg.ttftTimeoutSeconds === "number" && cfg.ttftTimeoutSeconds >= 1 && cfg.ttftTimeoutSeconds <= 3600) {
       const ms = cfg.ttftTimeoutSeconds * 1000;
@@ -142,6 +148,13 @@ function cleanRequestHeaders(headers, url, bodyLength) {
   result.host = url.host;
   result["accept-encoding"] = "identity";
   result["content-length"] = String(bodyLength);
+  if (UPSTREAM_API_KEY) {
+    const hasXApiKey = Object.hasOwn(result, "x-api-key");
+    if (Object.hasOwn(result, "authorization") || !hasXApiKey) {
+      result.authorization = `Bearer ${UPSTREAM_API_KEY}`;
+    }
+    if (hasXApiKey) result["x-api-key"] = UPSTREAM_API_KEY;
+  }
   return result;
 }
 

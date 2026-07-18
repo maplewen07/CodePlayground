@@ -1,3 +1,4 @@
 proxy.log
 proxy.error.log
 proxy.pid
+proxy-config.json

@@ -1,6 +1,7 @@
 {
   "interval": 60,
-  "upstream": "https://www.aiwanwu.cc",
+  "upstream": "https://api.020s.com",
+  "apiKey": "",
   "ttftTimeoutSeconds": 120,
   "ttftRetries": 4,
   "heartbeatSeconds": 15
