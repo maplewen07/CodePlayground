@@ -33,7 +33,7 @@ cp proxy-config.example.json proxy-config.json
 - `upstream`：上游 API 的 base URL。
 - `apiKey`：非空时覆盖请求原有的 API key；留空时保留请求原有认证信息。
 - `ttftTimeoutSeconds`：每轮等待有效输出的时间。
-- `ttftRetries`：重试次数；`4` 表示最多请求 5 轮。
+- `ttftRetries`：TTFT 超时、连接错误或 `/responses` 返回非 200 时的重试次数，范围 `0-100`；`4` 表示最多请求 5 轮。
 - `heartbeatSeconds`：等待期间向 Codex 发送 SSE 注释心跳的间隔。
 
 配置会自动热重载，新请求生效。

@@ -39,7 +39,7 @@ function readConfig() {
       if (ms !== TTFT_TIMEOUT_MS) log(`config TTFT changed: ${TTFT_TIMEOUT_MS / 1000}s → ${cfg.ttftTimeoutSeconds}s`);
       TTFT_TIMEOUT_MS = ms;
     }
-    if (!process.env.TTFT_RETRIES && Number.isInteger(cfg.ttftRetries) && cfg.ttftRetries >= 0 && cfg.ttftRetries <= 10) {
+    if (!process.env.TTFT_RETRIES && Number.isInteger(cfg.ttftRetries) && cfg.ttftRetries >= 0 && cfg.ttftRetries <= 100) {
       if (cfg.ttftRetries !== TTFT_RETRIES) log(`config retries changed: ${TTFT_RETRIES} → ${cfg.ttftRetries}`);
       TTFT_RETRIES = cfg.ttftRetries;
     }
@@ -71,7 +71,7 @@ const SESSION_INDEX = process.env.CODEX_SESSION_INDEX || path.join(os.homedir(),
 
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error("Invalid PORT");
 if (!Number.isFinite(TTFT_TIMEOUT_MS) || TTFT_TIMEOUT_MS < 1_000) throw new Error("Invalid TTFT_TIMEOUT_MS");
-if (!Number.isInteger(TTFT_RETRIES) || TTFT_RETRIES < 0 || TTFT_RETRIES > 10) throw new Error("Invalid TTFT_RETRIES");
+if (!Number.isInteger(TTFT_RETRIES) || TTFT_RETRIES < 0 || TTFT_RETRIES > 100) throw new Error("Invalid TTFT_RETRIES");
 
 const agents = {
   "http:": new http.Agent({ keepAlive: true }),
@@ -297,22 +297,30 @@ function forwardWithTtft(req, res, body) {
     let settled = false;
     let timer = null;
 
-    const retryOrClose = (reason) => {
-      if (closed || settled) return;
+    const scheduleRetry = (reason, announce) => {
+      if (closed || settled || attempt > TTFT_RETRIES) return false;
       settled = true;
       if (timer) clearTimeout(timer);
       activeRequest?.destroy();
       activeResponse?.destroy();
-      if (attempt <= TTFT_RETRIES) {
+      if (announce) {
         ensureSseResponse();
         res.write(`: ttft-proxy retry ${attempt + 1}\n\n`);
-        log(`${label} ${reason}; retrying attempt ${attempt + 1}/${TTFT_RETRIES + 1}`);
-        setTimeout(startAttempt, Math.min(1_000, attempt * 250));
-      } else {
-        log(`${label} ${reason}; final attempt failed`);
-        if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-        res.end();
       }
+      log(`${label} ${reason}; retrying attempt ${attempt + 1}/${TTFT_RETRIES + 1}`);
+      setTimeout(startAttempt, Math.min(1_000, attempt * 250));
+      return true;
+    };
+
+    const retryOrClose = (reason) => {
+      if (scheduleRetry(reason, true) || closed || settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      activeRequest?.destroy();
+      activeResponse?.destroy();
+      log(`${label} ${reason}; final attempt failed`);
+      if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      res.end();
     };
 
     if (enforceTtft) {
@@ -323,8 +331,24 @@ function forwardWithTtft(req, res, body) {
     activeRequest = requestUpstream(req, body, (upstreamRes) => {
       if (closed || settled) return upstreamRes.destroy();
       activeResponse = upstreamRes;
+      const statusCode = upstreamRes.statusCode || 502;
       const contentType = String(upstreamRes.headers["content-type"] || "");
-      if (upstreamRes.statusCode !== 200 || !contentType.includes("text/event-stream")) {
+      if (statusCode !== 200) {
+        const reason = `upstream returned HTTP ${statusCode} on attempt ${attempt}`;
+        if (scheduleRetry(reason, res.headersSent)) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        log(`${label} ${reason}; final response ${res.headersSent ? "cannot replace active SSE status" : "forwarded"}`);
+        if (res.headersSent) {
+          upstreamRes.resume();
+          res.end();
+          return;
+        }
+        res.writeHead(statusCode, cleanResponseHeaders(upstreamRes.headers));
+        upstreamRes.pipe(res);
+        return;
+      }
+      if (!contentType.includes("text/event-stream")) {
         settled = true;
         if (timer) clearTimeout(timer);
         if (res.headersSent) {
@@ -332,7 +356,7 @@ function forwardWithTtft(req, res, body) {
           res.end();
           return;
         }
-        res.writeHead(upstreamRes.statusCode || 502, cleanResponseHeaders(upstreamRes.headers));
+        res.writeHead(statusCode, cleanResponseHeaders(upstreamRes.headers));
         upstreamRes.pipe(res);
         return;
       }
